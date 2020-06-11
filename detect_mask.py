@@ -71,14 +71,17 @@ def main():
     default_model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
     default_labels = 'coco_labels.txt'
     
-    default_model2 = 'mask_detector.tflite'
+    
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help='.tflite model path',
                         default=os.path.join(default_model_dir,default_model))
     
+    #################### Keondo's Modification #########################
+    default_model2 = 'mask_detector.tflite'
     parser.add_argument('--model2', help='.tflite model path',
-                        default=os.path.join(default_model_dir,default_model2))
+                        default=default_model2)
+    #################### Keondo's Modification #########################
     
     
     parser.add_argument('--labels', help='label file path',
@@ -94,10 +97,12 @@ def main():
     interpreter = common.make_interpreter(args.model)
     interpreter.allocate_tensors()
     
-    ####################
+    #################### Keondo's Modification #########################
     interpreter2 = common.make_interpreter(args.model2)
     interpreter2.allocate_tensors()
-    ####################
+    print('Interpreter 2 loaded')
+    #################### Keondo's Modification #########################  
+    
     
     labels = load_labels(args.labels)
 
@@ -117,14 +122,40 @@ def main():
         objs = get_output(interpreter, score_threshold=args.threshold, top_k=args.top_k)
         cv2_im = append_objs_to_img(cv2_im, objs, labels)
         
-        ####################
+        #################### Keondo's Modification #########################
+        print('Interpreter 2 processing start')
         tensor_index = interpreter2.get_input_details()[0]['index']
-        interpreter2.tensor(tensor_index)()[0][:,:] = pil_im
+        pil_im2 = pil_im.resize((224,224), resample=Image.NEAREST)
+        interpreter2.tensor(tensor_index)()[0][:,:] = pil_im2
         interpreter2.invoke()
         output_details = interpreter2.get_output_details()[0]
         output_data = np.squeeze(interpreter2.tensor(output_details['index'])())
+        print('Interpreter 2 Output data')
         print(output_data)
-        ####################
+        if 'quantization' in output_details:
+            print('quantization')
+            print(output_details['quantization'])
+        elif 'quantization_parameters' in output_details:
+            print('quantization_parameters')
+            print(output_details['quantization_parameters'])
+        else:
+            print('No quantization')
+            
+        scales, zero_points, quantized_dimension = output_details['quantization_parameters']
+        if scales == 0:
+            objs2 = output_data - zero_points
+        else:
+            objs2 = scales * (output_data - zero_points)        
+        
+        print('Check objs2')
+        print(objs2)
+        
+        (mask, withoutMask) = objs2        
+        labelMask = "Mask" if mask > withoutMask else "No Mask"            
+        
+        cv2_im = cv2.putText(cv2_im, labelMask, (0, 30),
+                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+        #################### Keondo's Modification #########################        
 
         cv2.imshow('frame', cv2_im)
         if cv2.waitKey(1) & 0xFF == ord('q'):
