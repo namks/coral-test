@@ -1,12 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Jun  8 16:26:48 2020
-
-@author: milliman
-"""
 # Copyright 2019 Google LLC
 #
-# Licensed under the Apauche License, Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
@@ -38,6 +32,12 @@ def set_input(interpreter, image, resample=Image.NEAREST):
     """Copies data to input tensor."""
     image = image.resize((input_image_size(interpreter)[0:2]), resample)
     input_tensor(interpreter)[:, :] = image
+    
+def set_input2(interpreter, image, resample=Image.NEAREST):
+    """Copies data to input tensor."""
+    image = image.resize((224,224), resample)
+    image = np.expand_dims(image, axis=0)
+    input_tensor(interpreter)[:, :] = image    
 
 def input_image_size(interpreter):
     """Returns input image size as (width, height, channels) tuple."""
@@ -53,14 +53,36 @@ def output_tensor(interpreter, i):
     """Returns dequantized output tensor if quantized before."""
     output_details = interpreter.get_output_details()[i]
     output_data = np.squeeze(interpreter.tensor(output_details['index'])())
+    
+    #print('output_details')
+    #print(output_details)
+    
     if 'quantization' not in output_details:
         return output_data
     scale, zero_point = output_details['quantization']
+    
+    #print('Scale:', scale)
+    #print('output data:')
+    #print(output_data)
+    
+    
     if scale == 0:
         return output_data - zero_point
     return scale * (output_data - zero_point)
 
-    
+def output_tensor2(interpreter):
+    """Returns dequantized output tensor if quantized before."""
+    output_details = interpreter.get_output_details()[0]
+    output_data = np.squeeze(interpreter.tensor(output_details['index'])())
+        
+    if 'quantization' not in output_details:
+        return output_data
+    scale, zero_point = output_details['quantization']
+   
+    if scale == 0:
+        return output_data - zero_point
+    return scale * (output_data - zero_point)
+
 
     """Gets tensor details.
     Args:
@@ -79,5 +101,3 @@ def output_tensor(interpreter, i):
           'quantized_dimension': Specifies the dimension of per-axis
               quantization, in the case of multiple scales/zero_points.
               """
-
-
