@@ -68,24 +68,27 @@ def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
 
 def main():
     default_model_dir = '../all_models'
-    default_model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
-    default_labels = 'coco_labels.txt'
-    
+    #default_model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
+    default_model = 'mobilenet_ssd_v2_coco_quant_postprocess.tflite'
+    default_labels = 'coco_labels.txt'  
     
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help='.tflite model path',
-                        default=os.path.join(default_model_dir,default_model))
+                        default=default_model)
+                        #default=os.path.join(default_model_dir,default_model))
     
     #################### Keondo's Modification #########################
-    default_model2 = 'mask_detector.tflite'
+    #default_model2 = 'mask_detector.tflite'
+    default_model2 = 'mobilenet_v2_1.0_224_quant.tflite'
     parser.add_argument('--model2', help='.tflite model path',
                         default=default_model2)
     #################### Keondo's Modification #########################
     
     
     parser.add_argument('--labels', help='label file path',
-                        default=os.path.join(default_model_dir, default_labels))
+                        default=default_labels)
+                        #default=os.path.join(default_model_dir, default_labels))
     parser.add_argument('--top_k', type=int, default=3,
                         help='number of categories with highest score to display')
     parser.add_argument('--camera_idx', type=int, help='Index of which video source to use. ', default = 0)
@@ -94,11 +97,13 @@ def main():
     args = parser.parse_args()
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
-    interpreter = common.make_interpreter(args.model)
+    #interpreter = common.make_interpreter(args.model)
+    interpreter = tflite.Interpreter(model_path = args.model)
     interpreter.allocate_tensors()
     
     #################### Keondo's Modification #########################
-    interpreter2 = common.make_interpreter(args.model2)
+    #interpreter2 = common.make_interpreter(args.model2)
+    interpreter2 = tflite.Interpreter(model_path = args.model2)
     interpreter2.allocate_tensors()
     print('Interpreter 2 loaded')
     #################### Keondo's Modification #########################  
@@ -123,39 +128,71 @@ def main():
         cv2_im = append_objs_to_img(cv2_im, objs, labels)
         
         #################### Keondo's Modification #########################
-        print('Interpreter 2 processing start')
-        tensor_index = interpreter2.get_input_details()[0]['index']
-        pil_im2 = pil_im.resize((224,224), resample=Image.NEAREST)
-        interpreter2.tensor(tensor_index)()[0][:,:] = pil_im2
-        interpreter2.invoke()
-        output_details = interpreter2.get_output_details()[0]
-        output_data = np.squeeze(interpreter2.tensor(output_details['index'])())
-        print('Interpreter 2 Output data')
-        print(output_data)
-        if 'quantization' in output_details:
-            print('quantization')
-            print(output_details['quantization'])
-        elif 'quantization_parameters' in output_details:
-            print('quantization_parameters')
-            print(output_details['quantization_parameters'])
-        else:
-            print('No quantization')
+        #print('Interpreter 2 processing start')        
+        #pil_im2 = pil_im.resize((224,224), resample=Image.NEAREST)
+        #interpreter2.tensor(tensor_index)()[0][:,:] = pil_im2
+        #pil_im2 = np.expand_dims(pil_im2, axis=0)
+                
+        height, width, channels = cv2_im.shape
+        
+        for obj in objs:
+            x0, y0, x1, y1 = list(obj.bbox)
+            x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)                        
+            pil_im2 = Image.fromarray(cv2_im_rgb[y0:y1, x0:x1])
             
-        scales, zero_points, quantized_dimension = output_details['quantization_parameters']
-        if scales == 0:
-            objs2 = output_data - zero_points
-        else:
-            objs2 = scales * (output_data - zero_points)        
+            common.set_input2(interpreter2, pil_im2)
+            output_data = common.output_tensor2(interpreter2)
+            interpreter2.invoke()        
+            (mask, withoutMask) = output_data        
+            labelMask = "Mask" if mask > withoutMask else "No Mask"            
         
-        print('Check objs2')
-        print(objs2)
+            cv2_im = cv2.putText(cv2_im, labelMask, (x0, y0-10),
+                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+            
+        #tensor_index = interpreter2.get_input_details()[0]['index']
+        #set_input2 = interpreter2.tensor(tensor_index)()
+        #input_tensor2(interpreter2)[:,:] = pil_im2
+        #interpreter2.tensor(tensor_index)()[0][:,:] = pil_im2
+        #set_input2(pil_im2)
+        #interpreter2.set_tensor(tensor_index, pil_im2)
         
-        (mask, withoutMask) = objs2        
-        labelMask = "Mask" if mask > withoutMask else "No Mask"            
         
-        cv2_im = cv2.putText(cv2_im, labelMask, (0, 30),
-                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
-        #################### Keondo's Modification #########################        
+        
+        #output_details = interpreter2.get_output_details()[0]
+        #output_data = np.squeeze(interpreter2.tensor(output_details['index'])())
+        
+        
+        """
+        There is at least 1 reference to internal data
+      in the interpreter in the form of a numpy array or slice. Be sure to
+      only hold the function returned from tensor() if you are using raw
+      data access.
+      """
+        
+        
+        #print('Interpreter 2 Output data')
+        #print(output_data)
+        #if 'quantization' in output_details:
+        #    print('quantization')
+        #    print(output_details['quantization'])
+        #elif 'quantization_parameters' in output_details:
+        #    print('quantization_parameters')
+        #    print(output_details['quantization_parameters'])
+        #else:
+        #    print('No quantization')
+            
+        #scales, zero_points, quantized_dimension = output_details['quantization_parameters']
+        #if scales == 0:
+        #    objs2 = output_data - zero_points
+        #else:
+        #    objs2 = scales * (output_data - zero_points)        
+        
+        #print('Check objs2')
+        #print(objs2)
+        
+
+        #################### Keondo's Modification #########################    
+        
 
         cv2.imshow('frame', cv2_im)
         if cv2.waitKey(1) & 0xFF == ord('q'):
