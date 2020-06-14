@@ -30,6 +30,7 @@ import numpy as np
 import os
 from PIL import Image
 import re
+import pyttsx3
 import tflite_runtime.interpreter as tflite
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
@@ -67,7 +68,7 @@ def get_output(interpreter, score_threshold, top_k, image_scale=1.0):
     return [make(i) for i in range(top_k) if scores[i] >= score_threshold]
 
 def main():
-    default_model_dir = '../all_models'
+    default_model_dir = './all_models'
     #default_model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
     default_model = 'mobilenet_ssd_v2_coco_quant_postprocess.tflite'
     default_labels = 'coco_labels.txt'  
@@ -75,26 +76,32 @@ def main():
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help='.tflite model path',
-                        default=default_model)
-                        #default=os.path.join(default_model_dir,default_model))
+                        default = default_model)
+                        #default=os.path.join(default_model_dir,default_model))                        
+    
     
     #################### Keondo's Modification #########################
-    #default_model2 = 'mask_detector.tflite'
-    default_model2 = 'mobilenet_v2_1.0_224_quant.tflite'
+    default_model2 = 'mask_detector_quant.tflite'
+    #default_model2 = 'mask_detector_quant_edgetpu.tflite'
     parser.add_argument('--model2', help='.tflite model path',
                         default=default_model2)
-    #################### Keondo's Modification #########################
-    
+    #################### Keondo's Modification #########################    
     
     parser.add_argument('--labels', help='label file path',
-                        default=default_labels)
+                        default = default_labels)
                         #default=os.path.join(default_model_dir, default_labels))
+
     parser.add_argument('--top_k', type=int, default=3,
                         help='number of categories with highest score to display')
     parser.add_argument('--camera_idx', type=int, help='Index of which video source to use. ', default = 0)
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='classifier score threshold')
     args = parser.parse_args()
+    
+    #Initialize and configure pyttsx3 for warning messages    
+    engine = pyttsx3.init()
+    rate = engine.getProperty('rate')
+    engine.setProperty('rate', rate - 50)
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
     #interpreter = common.make_interpreter(args.model)
@@ -125,7 +132,7 @@ def main():
         common.set_input(interpreter, pil_im)
         interpreter.invoke()
         objs = get_output(interpreter, score_threshold=args.threshold, top_k=args.top_k)
-        cv2_im = append_objs_to_img(cv2_im, objs, labels)
+        #cv2_im = append_objs_to_img(cv2_im, objs, labels)
         
         #################### Keondo's Modification #########################
         #print('Interpreter 2 processing start')        
@@ -134,6 +141,8 @@ def main():
         #pil_im2 = np.expand_dims(pil_im2, axis=0)
                 
         height, width, channels = cv2_im.shape
+        
+        noMaskCount = 0
         
         for obj in objs:
             x0, y0, x1, y1 = list(obj.bbox)
@@ -144,10 +153,22 @@ def main():
             output_data = common.output_tensor2(interpreter2)
             interpreter2.invoke()        
             (mask, withoutMask) = output_data        
-            labelMask = "Mask" if mask > withoutMask else "No Mask"            
-        
+            
+            if mask > withoutMask:
+                labelMask = "Mask"  
+                color = (255, 0, 0) #blue
+            else:
+                labelMask = "No Mask"   
+                color = (0, 0, 255) #red
+                noMaskCount += 1
+            
+            labelMask = "{}: {:.2f}%".format(labelMask, max(mask, withoutMask) * 100) 
+            
+            cv2_im = cv2.rectangle(cv2_im, (x0, y0), (x1, y1), color, 2)        
             cv2_im = cv2.putText(cv2_im, labelMask, (x0, y0-10),
-                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
+        if noMaskCount > 0:
+            engine.say("There are " + str(noMaskCount) + "people not wearing masks. Please wear a mask")
             
         #tensor_index = interpreter2.get_input_details()[0]['index']
         #set_input2 = interpreter2.tensor(tensor_index)()
@@ -195,6 +216,7 @@ def main():
         
 
         cv2.imshow('frame', cv2_im)
+        engine.runAndWait()
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
