@@ -30,7 +30,7 @@ import numpy as np
 import os
 from PIL import Image
 import re
-import pyttsx3
+#import pyttsx3
 import tflite_runtime.interpreter as tflite
 
 Object = collections.namedtuple('Object', ['id', 'score', 'bbox'])
@@ -99,9 +99,9 @@ def main():
     args = parser.parse_args()
     
     #Initialize and configure pyttsx3 for warning messages    
-    engine = pyttsx3.init()
-    rate = engine.getProperty('rate')
-    engine.setProperty('rate', rate - 50)
+    #engine = pyttsx3.init()
+    #rate = engine.getProperty('rate')
+    #engine.setProperty('rate', rate - 50)
 
     print('Loading {} with {} labels.'.format(args.model, args.labels))
     #interpreter = common.make_interpreter(args.model)
@@ -119,6 +119,8 @@ def main():
     labels = load_labels(args.labels)
 
     cap = cv2.VideoCapture(args.camera_idx)
+
+    frame_no = 0
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -144,21 +146,45 @@ def main():
         
         noMaskCount = 0
         
-        for obj in objs:
-            x0, y0, x1, y1 = list(obj.bbox)
+        mask_data = []
+        
+        i = 0
+        
+        #for obj in objs:
+        for i in range(len(objs)-1,-1, -1):
+            #x0, y0, x1, y1 = list(obj.bbox)
+            x0, y0, x1, y1 = list(objs[i].bbox)
             x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)                        
             pil_im2 = Image.fromarray(cv2_im_rgb[y0:y1, x0:x1])
-            
+            print("Bf NN: ", frame_no, i, x0, y0)
             common.set_input2(interpreter2, pil_im2)
             output_data = common.output_tensor2(interpreter2)
-            interpreter2.invoke()        
-            (mask, withoutMask) = output_data        
+            interpreter2.invoke()       
+            print("Af NN: ", frame_no, i, x0, y0)
+            print("Output data: ", output_data)
+            mask_data.append((len(objs) - 1 - i, output_data))   
+            #qi += 1
+        
+        j = 0
+        
+        #for obj in objs:
+        for j in range(len(objs)):
+            #x0, y0, x1, y1 = list(obj.bbox)
+            x0, y0, x1, y1 = list(objs[j].bbox)
+            x0, y0, x1, y1 = int(x0*width), int(y0*height), int(x1*width), int(y1*height)           
             
+            print("2nd loop: ", frame_no, j, x0, y0)            
+            print(list(filter(lambda x: x[0] == j, mask_data)))
+            
+            output = list(filter(lambda x: x[0] == j, mask_data))     
+            
+            mask, withoutMask = output[0][1]
+                        
             if mask > withoutMask:
-                labelMask = "Mask"  
+                labelMask = "Mask (" + str(x0) + "," + str(y0) + ")" 
                 color = (255, 0, 0) #blue
             else:
-                labelMask = "No Mask"   
+                labelMask = "No Mask (" + str(x0) + "," + str(y0) + ")"   
                 color = (0, 0, 255) #red
                 noMaskCount += 1
             
@@ -167,8 +193,11 @@ def main():
             cv2_im = cv2.rectangle(cv2_im, (x0, y0), (x1, y1), color, 2)        
             cv2_im = cv2.putText(cv2_im, labelMask, (x0, y0-10),
                                  cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
-        if noMaskCount > 0:
-            engine.say("There are " + str(noMaskCount) + "people not wearing masks. Please wear a mask")
+            #j += 1
+            
+        frame_no += 1
+        #if noMaskCount > 0:
+        #    engine.say("There are " + str(noMaskCount) + "people not wearing masks. Please wear a mask")
             
         #tensor_index = interpreter2.get_input_details()[0]['index']
         #set_input2 = interpreter2.tensor(tensor_index)()
@@ -216,7 +245,7 @@ def main():
         
 
         cv2.imshow('frame', cv2_im)
-        engine.runAndWait()
+        #engine.runAndWait()
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
